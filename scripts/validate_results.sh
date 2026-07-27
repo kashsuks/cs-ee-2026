@@ -19,16 +19,19 @@
 # plain-text summary printed to the terminal.
 #
 # Usage: ./validate_results.sh [path/to/results.csv]
-#   (defaults to ./results.csv if no argument is given)
+#   (defaults to results/results.csv if no argument is given)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_DIR="$SCRIPT_DIR/bin"
-TESTCASE_DIR="$SCRIPT_DIR/testcases"
-RESULTS_FILE="${1:-$SCRIPT_DIR/results.csv}"
-DIJKSTRA_BASELINE_FILE="$SCRIPT_DIR/dijkstra_baseline.csv"
-REPORT_FILE="$SCRIPT_DIR/validation_report.csv"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BIN_DIR="$ROOT_DIR/bin"
+ALGO_DIR="$ROOT_DIR/algorithms"
+TESTCASE_DIR="$ROOT_DIR/testcases"
+RESULTS_DIR="$ROOT_DIR/results"
+RESULTS_FILE="${1:-$RESULTS_DIR/results.csv}"
+DIJKSTRA_BASELINE_FILE="$RESULTS_DIR/dijkstra_baseline.csv"
+REPORT_FILE="$RESULTS_DIR/validation_report.csv"
 
 N_MIN=0
 N_MAX=20
@@ -43,10 +46,11 @@ fi
 if [[ ! -x "$BIN_DIR/dijkstra" ]]; then
     echo "dijkstra binary not found, compiling it now..."
     mkdir -p "$BIN_DIR"
-    g++ -O2 -std=c++17 -o "$BIN_DIR/dijkstra" "$SCRIPT_DIR/dijkstra.cpp"
+    g++ -O2 -std=c++17 -I"$ROOT_DIR" -o "$BIN_DIR/dijkstra" "$ALGO_DIR/dijkstra.cpp"
 fi
 
 echo "=== Running Dijkstra baseline (ground truth optimal cost per N) ==="
+mkdir -p "$RESULTS_DIR"
 echo "algorithm,n,run,time_ms,nodes_explored,path_cost" > "$DIJKSTRA_BASELINE_FILE"
 
 for n in $(seq "$N_MIN" "$N_MAX"); do

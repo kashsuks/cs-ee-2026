@@ -1,12 +1,12 @@
 #!/bin/bash
 # run_experiment.sh
 #
-# Compiles manhattan.cpp, euclidean.cpp, chebyshev.cpp, dijkstra.cpp (all at
-# repo root, sharing helpers/astar_common.h) and runs the three HEURISTIC
+# Compiles manhattan.cpp, euclidean.cpp, chebyshev.cpp, dijkstra.cpp (all in
+# algorithms/, sharing helpers/astar_common.h) and runs the three HEURISTIC
 # binaries -- manhattan, euclidean, chebyshev -- against every test case
 # (N = 0 to 20), 20 times per (algorithm, N) pair, one run after another.
 # That's 21 x 3 x 20 = 1260 runs total. Every single run is logged as its
-# own row in results.csv: algorithm, N, run index, time in ms, nodes
+# own row in results/results.csv: algorithm, N, run index, time in ms, nodes
 # explored, and path cost.
 #
 # dijkstra is compiled too but NOT included in the main loop -- it's a plain
@@ -14,14 +14,17 @@
 # compared. Run it manually if you want an optimality check, e.g.:
 #   ./bin/dijkstra testcases/testcase_n_5.txt 5 1
 #
-# Usage: ./run_experiment.sh   (run from the cs-ee-2026 root)
+# Usage: ./run_experiment.sh   (can be run from anywhere)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_DIR="$SCRIPT_DIR/bin"
-TESTCASE_DIR="$SCRIPT_DIR/testcases"
-RESULTS_FILE="$SCRIPT_DIR/results.csv"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BIN_DIR="$ROOT_DIR/bin"
+ALGO_DIR="$ROOT_DIR/algorithms"
+TESTCASE_DIR="$ROOT_DIR/testcases"
+RESULTS_DIR="$ROOT_DIR/results"
+RESULTS_FILE="$RESULTS_DIR/results.csv"
 
 RUNS_PER_CASE=20
 N_MIN=0
@@ -44,12 +47,13 @@ echo "=== Compiling binaries ==="
 mkdir -p "$BIN_DIR"
 for algo in "${ALL_BINARIES[@]}"; do
     echo "Compiling $algo..."
-    g++ -O2 -std=c++17 -o "$BIN_DIR/$algo" "$SCRIPT_DIR/$algo.cpp"
+    g++ -O2 -std=c++17 -I"$ROOT_DIR" -o "$BIN_DIR/$algo" "$ALGO_DIR/$algo.cpp"
 done
 echo "All binaries compiled."
 echo ""
 
 echo "=== Running experiment ==="
+mkdir -p "$RESULTS_DIR"
 echo "algorithm,n,run,time_ms,nodes_explored,path_cost" > "$RESULTS_FILE"
 
 total_runs=$(( (N_MAX - N_MIN + 1) * ${#ALGORITHMS[@]} * RUNS_PER_CASE ))
