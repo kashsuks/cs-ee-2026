@@ -25,8 +25,8 @@ import os
 import re
 import sys # noqa
 
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt # noqa
+import matplotlib.patches as mpatches # noqa
 
 
 # ---------- parsing ----------
