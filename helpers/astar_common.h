@@ -26,10 +26,18 @@ struct test_case {
     int width, height;
     point start, target;
     std::unordered_set<point, point_hash> obstacles;
+
+    // orthogonal edges
     // h_weights[(x,y)] = weight of edge between (x,y) and (x+1,y)
     // v_weights[(x,y)] = weight of edge between (x,y) and (x,y+1)
     std::unordered_map<point, int, point_hash> h_weights;
     std::unordered_map<point, int, point_hash> v_weights;
+
+    // diagonal edges (only used when a search runs in 8-directional mode)
+    // d1_weights[(x,y)] = weight of edge between (x,y) and (x+1,y+1)   ("down-right")
+    // d2_weights[(x,y)] = weight of edge between (x,y) and (x+1,y-1)   ("up-right")
+    std::unordered_map<point, int, point_hash> d1_weights;
+    std::unordered_map<point, int, point_hash> d2_weights;
 };
 
 // splits a "x,y" style token into a point
@@ -66,11 +74,13 @@ inline test_case parse_test_case(const std::string& path) {
         if (first == "OBSTACLES") { section = "OBSTACLES"; continue; }
         if (first == "EDGE_WEIGHTS_HORIZONTAL") { section = "H"; continue; }
         if (first == "EDGE_WEIGHTS_VERTICAL") { section = "V"; continue; }
+        if (first == "EDGE_WEIGHTS_DIAGONAL_DOWN_RIGHT") { section = "D1"; continue; }
+        if (first == "EDGE_WEIGHTS_DIAGONAL_UP_RIGHT") { section = "D2"; continue; }
 
         // otherwise, this line is data belonging to the current section
         if (section == "OBSTACLES") {
             tc.obstacles.insert(parse_point(first));
-        } else if (section == "H" || section == "V") {
+        } else if (section == "H" || section == "V" || section == "D1" || section == "D2") {
             // format: x,y,weight
             std::stringstream ss(first);
             std::string tok;
@@ -79,7 +89,9 @@ inline test_case parse_test_case(const std::string& path) {
             point p{parts[0], parts[1]};
             int w = parts[2];
             if (section == "H") tc.h_weights[p] = w;
-            else tc.v_weights[p] = w;
+            else if (section == "V") tc.v_weights[p] = w;
+            else if (section == "D1") tc.d1_weights[p] = w;
+            else if (section == "D2") tc.d2_weights[p] = w;
         }
     }
 
@@ -88,7 +100,10 @@ inline test_case parse_test_case(const std::string& path) {
 
 // returns neighbours of a node along with the cost of moving to each one.
 // obstacle nodes are skipped entirely, so edges leading into a wall never exist.
-inline std::vector<std::pair<point, int>> get_neighbours(const test_case& tc, const point& n) {
+// allow_diagonal controls whether the 4 diagonal neighbours are included --
+// pass false for heuristics that assume 4-directional movement (Manhattan),
+// and true for heuristics that assume 8-directional movement (Euclidean, Chebyshev).
+inline std::vector<std::pair<point, int>> get_neighbours(const test_case& tc, const point& n, bool allow_diagonal) {
     std::vector<std::pair<point, int>> result;
 
     // right
@@ -112,6 +127,29 @@ inline std::vector<std::pair<point, int>> get_neighbours(const test_case& tc, co
         if (!tc.obstacles.count(nb)) result.push_back({nb, tc.v_weights.at({n.x, n.y - 1})});
     }
 
+    if (!allow_diagonal) return result;
+
+    // down-right: (x,y) -> (x+1,y+1), stored at key (x,y) in d1_weights
+    if (n.x + 1 < tc.width && n.y + 1 < tc.height) {
+        point nb{n.x + 1, n.y + 1};
+        if (!tc.obstacles.count(nb)) result.push_back({nb, tc.d1_weights.at({n.x, n.y})});
+    }
+    // up-left: (x,y) -> (x-1,y-1), same edge as down-right stored at (x-1,y-1)
+    if (n.x - 1 >= 0 && n.y - 1 >= 0) {
+        point nb{n.x - 1, n.y - 1};
+        if (!tc.obstacles.count(nb)) result.push_back({nb, tc.d1_weights.at({n.x - 1, n.y - 1})});
+    }
+    // up-right: (x,y) -> (x+1,y-1), stored at key (x,y-1) in d2_weights
+    if (n.x + 1 < tc.width && n.y - 1 >= 0) {
+        point nb{n.x + 1, n.y - 1};
+        if (!tc.obstacles.count(nb)) result.push_back({nb, tc.d2_weights.at({n.x, n.y - 1})});
+    }
+    // down-left: (x,y) -> (x-1,y+1), same edge as up-right stored at (x-1,y)
+    if (n.x - 1 >= 0 && n.y + 1 < tc.height) {
+        point nb{n.x - 1, n.y + 1};
+        if (!tc.obstacles.count(nb)) result.push_back({nb, tc.d2_weights.at({n.x - 1, n.y})});
+    }
+
     return result;
 }
 
@@ -127,8 +165,10 @@ struct open_entry {
     bool operator>(const open_entry& o) const { return f > o.f; }
 };
 
-// generic search: pass h = [](point,point){ return 0.0; } to get plain Dijkstra
-inline search_result run_search(const test_case& tc, const std::function<double(const point&, const point&)>& h) {
+// generic search: pass h = [](point,point){ return 0.0; } to get plain Dijkstra.
+// allow_diagonal controls the movement rule the search runs under -- this should
+// match the assumption baked into the heuristic being used (see get_neighbours).
+inline search_result run_search(const test_case& tc, const std::function<double(const point&, const point&)>& h, bool allow_diagonal) {
     std::priority_queue<open_entry, std::vector<open_entry>, std::greater<open_entry>> open_queue;
     std::unordered_map<point, int, point_hash> g_score;
     std::unordered_set<point, point_hash> closed_set;
@@ -150,7 +190,7 @@ inline search_result run_search(const test_case& tc, const std::function<double(
             return { true, g_score[current], nodes_explored };
         }
 
-        for (const auto& [neighbour, cost] : get_neighbours(tc, current)) {
+        for (const auto& [neighbour, cost] : get_neighbours(tc, current, allow_diagonal)) {
             if (closed_set.count(neighbour)) continue;
 
             int tentative_g = g_score[current] + cost;

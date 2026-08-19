@@ -14,12 +14,17 @@ int main(int argc, char* argv[]) {
 
     test_case tc = parse_test_case(testcase_file);
 
+    // Manhattan distance assumes strictly axis-aligned movement, so this
+    // search runs in 4-directional mode -- matching the heuristic's own
+    // assumption rather than the graph's full connectivity.
+    const bool allow_diagonal = false;
+
     auto heuristic = [](const point& a, const point& b) -> double {
         return std::abs(a.x - b.x) + std::abs(a.y - b.y);
     };
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    search_result result = run_search(tc, heuristic);
+    search_result result = run_search(tc, heuristic, allow_diagonal);
     auto t1 = std::chrono::high_resolution_clock::now();
 
     double time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

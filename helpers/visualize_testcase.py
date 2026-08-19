@@ -2,31 +2,31 @@
 """
 visualize_testcase.py
 
-Renders a testcase_n_N.txt file (as produced for the A* / weighted-grid
-experiment) into a PNG image: nodes as circles, obstacles shaded dark,
-start/target coloured, and edge weights labelled.
+Renders a testcase_n_N.txt file into a PNG image: nodes as circles,
+obstacles shaded dark, start/target coloured, and edge weights labelled
+(including diagonal edges now that Euclidean and Chebyshev use them).
 
-Optionally runs a chosen heuristic (or plain Dijkstra) and overlays the
-resulting path, so you can visually confirm what a given algorithm actually
-does on a specific test case.
+Optionally runs a chosen heuristic and overlays the resulting path. Each
+heuristic runs under the movement rule its own formula assumes:
+    manhattan  -> 4-directional
+    euclidean  -> 8-directional
+    chebyshev  -> 8-directional
+    dijkstra   -> 4-directional by default; pass --diagonal to run it
+                  in 8-directional mode instead (to match euclidean/chebyshev)
 
 Usage:
     python3 visualize_testcase.py testcases/testcase_n_5.txt
     python3 visualize_testcase.py testcases/testcase_n_5.txt --heuristic manhattan
     python3 visualize_testcase.py testcases/testcase_n_5.txt --heuristic chebyshev -o out.png
-
-Heuristic options: manhattan, euclidean, chebyshev, dijkstra, none (default: none)
 """
 
-import argparse # noqa
+import argparse
 import heapq
 import math
 import os
-import re
-import sys # noqa
 
-import matplotlib.pyplot as plt # noqa
-import matplotlib.patches as mpatches # noqa
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 
 # ---------- parsing ----------
@@ -35,8 +35,10 @@ def parse_testcase(path):
     width = height = None
     start = target = None
     obstacles = set()
-    h_weights = {}  # (x, y) -> weight of edge (x,y)-(x+1,y)
-    v_weights = {}  # (x, y) -> weight of edge (x,y)-(x,y+1)
+    h_weights = {}
+    v_weights = {}
+    d1_weights = {}  # (x,y) -> (x+1,y+1)
+    d2_weights = {}  # (x,y) -> (x+1,y-1)
 
     section = None
 
@@ -47,63 +49,75 @@ def parse_testcase(path):
                 continue
 
             if line.startswith("GRID_WIDTH"):
-                width = int(line.split()[1])
-                continue
+                width = int(line.split()[1]); continue
             if line.startswith("GRID_HEIGHT"):
-                height = int(line.split()[1])
-                continue
+                height = int(line.split()[1]); continue
             if line.startswith("START"):
-                x, y = map(int, line.split()[1].split(","))
-                start = (x, y)
-                continue
+                x, y = map(int, line.split()[1].split(",")); start = (x, y); continue
             if line.startswith("TARGET"):
-                x, y = map(int, line.split()[1].split(","))
-                target = (x, y)
-                continue
+                x, y = map(int, line.split()[1].split(",")); target = (x, y); continue
             if line.startswith("OBSTACLE_COUNT"):
                 continue
             if line == "OBSTACLES":
-                section = "OBSTACLES"
-                continue
+                section = "OBSTACLES"; continue
             if line == "EDGE_WEIGHTS_HORIZONTAL":
-                section = "H"
-                continue
+                section = "H"; continue
             if line == "EDGE_WEIGHTS_VERTICAL":
-                section = "V"
-                continue
+                section = "V"; continue
+            if line == "EDGE_WEIGHTS_DIAGONAL_DOWN_RIGHT":
+                section = "D1"; continue
+            if line == "EDGE_WEIGHTS_DIAGONAL_UP_RIGHT":
+                section = "D2"; continue
 
-            # data line belonging to current section
             if section == "OBSTACLES":
                 x, y = map(int, line.split(","))
                 obstacles.add((x, y))
             elif section == "H":
-                x, y, w = map(int, line.split(","))
-                h_weights[(x, y)] = w
+                x, y, w = map(int, line.split(",")); h_weights[(x, y)] = w
             elif section == "V":
-                x, y, w = map(int, line.split(","))
-                v_weights[(x, y)] = w
+                x, y, w = map(int, line.split(",")); v_weights[(x, y)] = w
+            elif section == "D1":
+                x, y, w = map(int, line.split(",")); d1_weights[(x, y)] = w
+            elif section == "D2":
+                x, y, w = map(int, line.split(",")); d2_weights[(x, y)] = w
 
     return {
         "width": width, "height": height,
         "start": start, "target": target,
         "obstacles": obstacles,
         "h_weights": h_weights, "v_weights": v_weights,
+        "d1_weights": d1_weights, "d2_weights": d2_weights,
     }
 
 
 # ---------- search (for optional path overlay) ----------
 
-def neighbours(tc, node):
+def neighbours(tc, node, allow_diagonal):
     x, y = node
+    obstacles = tc["obstacles"]
     result = []
-    if x + 1 < tc["width"] and (x + 1, y) not in tc["obstacles"]:
+
+    if x + 1 < tc["width"] and (x + 1, y) not in obstacles:
         result.append(((x + 1, y), tc["h_weights"][(x, y)]))
-    if x - 1 >= 0 and (x - 1, y) not in tc["obstacles"]:
+    if x - 1 >= 0 and (x - 1, y) not in obstacles:
         result.append(((x - 1, y), tc["h_weights"][(x - 1, y)]))
-    if y + 1 < tc["height"] and (x, y + 1) not in tc["obstacles"]:
+    if y + 1 < tc["height"] and (x, y + 1) not in obstacles:
         result.append(((x, y + 1), tc["v_weights"][(x, y)]))
-    if y - 1 >= 0 and (x, y - 1) not in tc["obstacles"]:
+    if y - 1 >= 0 and (x, y - 1) not in obstacles:
         result.append(((x, y - 1), tc["v_weights"][(x, y - 1)]))
+
+    if not allow_diagonal:
+        return result
+
+    if x + 1 < tc["width"] and y + 1 < tc["height"] and (x + 1, y + 1) not in obstacles:
+        result.append(((x + 1, y + 1), tc["d1_weights"][(x, y)]))
+    if x - 1 >= 0 and y - 1 >= 0 and (x - 1, y - 1) not in obstacles:
+        result.append(((x - 1, y - 1), tc["d1_weights"][(x - 1, y - 1)]))
+    if x + 1 < tc["width"] and y - 1 >= 0 and (x + 1, y - 1) not in obstacles:
+        result.append(((x + 1, y - 1), tc["d2_weights"][(x, y - 1)]))
+    if x - 1 >= 0 and y + 1 < tc["height"] and (x - 1, y + 1) not in obstacles:
+        result.append(((x - 1, y + 1), tc["d2_weights"][(x - 1, y)]))
+
     return result
 
 
@@ -119,7 +133,16 @@ def heuristic_fn(name):
     raise ValueError(f"unknown heuristic: {name}")
 
 
-def a_star(tc, heuristic_name):
+# each heuristic runs under the movement rule its own formula assumes
+MOVEMENT_RULE = {
+    "manhattan": False,   # 4-directional
+    "euclidean": True,    # 8-directional
+    "chebyshev": True,    # 8-directional
+    "dijkstra": False,    # 4-directional by default (see --diagonal flag)
+}
+
+
+def a_star(tc, heuristic_name, allow_diagonal):
     h = heuristic_fn(heuristic_name)
     start, target = tc["start"], tc["target"]
 
@@ -143,7 +166,7 @@ def a_star(tc, heuristic_name):
             path.reverse()
             return path, explored_order, g_score[current]
 
-        for nb, cost in neighbours(tc, current):
+        for nb, cost in neighbours(tc, current, allow_diagonal):
             if nb in closed:
                 continue
             tentative_g = g_score[current] + cost
@@ -157,14 +180,14 @@ def a_star(tc, heuristic_name):
 
 # ---------- rendering ----------
 
-def render(tc, testcase_number, heuristic_name, output_path):
+def render(tc, testcase_path, heuristic_name, allow_diagonal, output_path):
     width, height = tc["width"], tc["height"]
     obstacles = tc["obstacles"]
     start, target = tc["start"], tc["target"]
 
     fig, ax = plt.subplots(figsize=(width * 0.7, height * 0.7))
 
-    # draw edges (skip any edge touching an obstacle -- it doesn't exist)
+    # orthogonal edges
     for (x, y), w in tc["h_weights"].items():
         if (x, y) in obstacles or (x + 1, y) in obstacles:
             continue
@@ -179,9 +202,20 @@ def render(tc, testcase_number, heuristic_name, output_path):
         ax.text(x + 0.22, y + 0.5, str(w), ha="center", va="center",
                  fontsize=7, color="#8a857c")
 
+    # diagonal edges -- drawn lighter/thinner so the grid doesn't get too busy
+    for (x, y), w in tc["d1_weights"].items():
+        if (x, y) in obstacles or (x + 1, y + 1) in obstacles:
+            continue
+        ax.plot([x, x + 1], [y, y + 1], color="#ddd9d0", zorder=0, linewidth=0.7)
+
+    for (x, y), w in tc["d2_weights"].items():
+        if (x, y) in obstacles or (x + 1, y - 1) in obstacles:
+            continue
+        ax.plot([x, x + 1], [y, y - 1], color="#ddd9d0", zorder=0, linewidth=0.7)
+
     path = explored = cost = None
     if heuristic_name != "none":
-        path, explored, cost = a_star(tc, heuristic_name)
+        path, explored, cost = a_star(tc, heuristic_name, allow_diagonal)
 
         if explored:
             ex_x = [p[0] for p in explored]
@@ -194,7 +228,6 @@ def render(tc, testcase_number, heuristic_name, output_path):
             ax.plot(path_x, path_y, color="#BA7517", linewidth=3, zorder=3,
                      solid_capstyle="round")
 
-    # draw nodes on top
     for x in range(width):
         for y in range(height):
             if (x, y) in obstacles:
@@ -210,7 +243,7 @@ def render(tc, testcase_number, heuristic_name, output_path):
 
     ax.set_xlim(-0.6, width - 0.4)
     ax.set_ylim(-0.6, height - 0.4)
-    ax.invert_yaxis()  # (0,0) at top-left, matching how the grid is described
+    ax.invert_yaxis()
     ax.set_aspect("equal")
     ax.set_xticks(range(width))
     ax.set_yticks(range(height))
@@ -230,10 +263,11 @@ def render(tc, testcase_number, heuristic_name, output_path):
               bbox_to_anchor=(0.5, -0.06), ncol=len(legend_handles), frameon=False,
               fontsize=8)
 
-    title = f"Visualization of Testcase {testcase_number} (N = {testcase_number})"
+    title = os.path.basename(testcase_path)
     if heuristic_name != "none":
+        rule = "8-directional" if allow_diagonal else "4-directional"
         cost_str = cost if cost is not None else "no path found"
-        title += f"  —  {heuristic_name}  (cost: {cost_str}, nodes explored: {len(explored)})"
+        title += f"  —  {heuristic_name} ({rule})  (cost: {cost_str}, nodes explored: {len(explored)})"
     ax.set_title(title, fontsize=10)
 
     fig.tight_layout()
@@ -252,23 +286,28 @@ def main():
     parser.add_argument("--heuristic", default="none",
                          choices=["none", "manhattan", "euclidean", "chebyshev", "dijkstra"],
                          help="overlay the path found by this algorithm (default: none)")
+    parser.add_argument("--diagonal", action="store_true",
+                         help="force 8-directional movement (only meaningful with --heuristic dijkstra, "
+                              "since manhattan/euclidean/chebyshev already use their own fixed movement rule)")
     parser.add_argument("-o", "--output", default=None,
                          help="output PNG path (default: <testcase_name>.png next to the input file)")
     args = parser.parse_args()
 
     tc = parse_testcase(args.testcase_file)
 
-    base = os.path.splitext(os.path.basename(args.testcase_file))[0]
-    match = re.match(r"testcase_n_(\d+)", base)
-    testcase_number = match.group(1) if match else base
+    if args.heuristic == "dijkstra":
+        allow_diagonal = args.diagonal
+    else:
+        allow_diagonal = MOVEMENT_RULE.get(args.heuristic, False)
 
     if args.output:
         output_path = args.output
     else:
+        base = os.path.splitext(os.path.basename(args.testcase_file))[0]
         suffix = f"_{args.heuristic}" if args.heuristic != "none" else ""
         output_path = os.path.join(os.path.dirname(args.testcase_file) or ".", f"{base}{suffix}.png")
 
-    render(tc, testcase_number, args.heuristic, output_path)
+    render(tc, args.testcase_file, args.heuristic, allow_diagonal, output_path)
 
 
 if __name__ == "__main__":

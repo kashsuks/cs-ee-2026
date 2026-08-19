@@ -1,19 +1,19 @@
 #!/bin/bash
 # validate_results.sh
 #
-# Runs Dijkstra's algorithm (h(n) = 0, guaranteed optimal) once against each
-# of the 21 test cases to establish the true shortest path cost for each N.
-# Then cross-checks that baseline against results.csv (produced by
-# run_experiment.sh) to confirm two things for every heuristic, at every N:
+# Runs Dijkstra's algorithm as a ground-truth baseline against each of the
+# 21 test cases -- but now in TWO modes, since Manhattan runs 4-directional
+# while Euclidean and Chebyshev run 8-directional, so "optimal" means a
+# different number for each group:
 #
-#   1. OPTIMAL   -- did the heuristic's path cost match Dijkstra's true
-#                   shortest path cost? (if not, the heuristic found a
-#                   suboptimal path, which matters most for chebyshev since
-#                   it is not admissible on a 4-directional-only grid)
-#   2. CONSISTENT -- did all 20 repeated runs of that heuristic on that same
-#                    test case return the same path cost? (A* is
-#                    deterministic given a fixed graph, so any variation
-#                    here would indicate a bug, not real randomness)
+#   4-directional baseline -> validates Manhattan
+#   8-directional baseline -> validates Euclidean and Chebyshev
+#
+# For every heuristic, at every N, this checks:
+#   1. OPTIMAL     -- did the heuristic's path cost match the baseline that
+#                      matches ITS OWN movement rule?
+#   2. CONSISTENT  -- did all 10 repeated runs of that heuristic on that
+#                      same test case return the same path cost?
 #
 # Output: validation_report.csv, one row per (n, algorithm) pair, plus a
 # plain-text summary printed to the terminal.
@@ -30,7 +30,8 @@ ALGO_DIR="$ROOT_DIR/algorithms"
 TESTCASE_DIR="$ROOT_DIR/testcases"
 RESULTS_DIR="$ROOT_DIR/results"
 RESULTS_FILE="${1:-$RESULTS_DIR/results.csv}"
-DIJKSTRA_BASELINE_FILE="$RESULTS_DIR/dijkstra_baseline.csv"
+DIJKSTRA_4DIR_FILE="$RESULTS_DIR/dijkstra_baseline_4dir.csv"
+DIJKSTRA_8DIR_FILE="$RESULTS_DIR/dijkstra_baseline_8dir.csv"
 REPORT_FILE="$RESULTS_DIR/validation_report.csv"
 
 N_MIN=0
@@ -42,16 +43,16 @@ if [[ ! -f "$RESULTS_FILE" ]]; then
     exit 1
 fi
 
-# make sure dijkstra is compiled
 if [[ ! -x "$BIN_DIR/dijkstra" ]]; then
     echo "dijkstra binary not found, compiling it now..."
     mkdir -p "$BIN_DIR"
     g++ -O2 -std=c++17 -I"$ROOT_DIR" -o "$BIN_DIR/dijkstra" "$ALGO_DIR/dijkstra.cpp"
 fi
 
-echo "=== Running Dijkstra baseline (ground truth optimal cost per N) ==="
+echo "=== Running Dijkstra baselines (4-dir for Manhattan, 8-dir for Euclidean/Chebyshev) ==="
 mkdir -p "$RESULTS_DIR"
-echo "algorithm,n,run,time_ms,nodes_explored,path_cost" > "$DIJKSTRA_BASELINE_FILE"
+echo "algorithm,n,run,time_ms,nodes_explored,path_cost" > "$DIJKSTRA_4DIR_FILE"
+echo "algorithm,n,run,time_ms,nodes_explored,path_cost" > "$DIJKSTRA_8DIR_FILE"
 
 for n in $(seq "$N_MIN" "$N_MAX"); do
     testcase_file="$TESTCASE_DIR/testcase_n_${n}.txt"
@@ -59,38 +60,36 @@ for n in $(seq "$N_MIN" "$N_MAX"); do
         echo "WARNING: missing test case file $testcase_file, skipping N=$n"
         continue
     fi
-    # Dijkstra's path cost is deterministic, so one run per N is sufficient
-    # -- this is a correctness baseline, not a timing benchmark.
-    "$BIN_DIR/dijkstra" "$testcase_file" "$n" 1 >> "$DIJKSTRA_BASELINE_FILE"
+    # path cost is deterministic per mode, so one run per N per mode is enough
+    "$BIN_DIR/dijkstra" "$testcase_file" "$n" 1 >> "$DIJKSTRA_4DIR_FILE"
+    "$BIN_DIR/dijkstra" "$testcase_file" "$n" 1 diagonal >> "$DIJKSTRA_8DIR_FILE"
 done
-echo "Baseline written to $DIJKSTRA_BASELINE_FILE"
+echo "Baselines written to $DIJKSTRA_4DIR_FILE and $DIJKSTRA_8DIR_FILE"
 echo ""
 
-echo "=== Cross-checking $RESULTS_FILE against the baseline ==="
+echo "=== Cross-checking $RESULTS_FILE against the matching baseline ==="
 awk -F',' '
-    # --- pass 1: read the dijkstra baseline into optimal_cost[n] ---
+    # pass 1: 4-dir baseline (this file)
     FNR==NR {
-        if (FNR == 1) next  # skip header
-        n = $2
-        cost = $6
-        optimal_cost[n] = cost
+        if (FNR == 1) next
+        optimal_4dir[$2] = $6
         next
     }
-
-    # --- pass 2: read results.csv, grouping by (algorithm, n) ---
-    FNR==1 { next }  # skip header of results.csv
-    {
-        algo = $1
-        n = $2
-        cost = $6
+    # pass 2: 8-dir baseline
+    FILENAME=="'"$DIJKSTRA_8DIR_FILE"'" {
+        if (FNR == 1) next
+        optimal_8dir[$2] = $6
+        next
+    }
+    # pass 3: results.csv
+    FILENAME=="'"$RESULTS_FILE"'" {
+        if (FNR == 1) next
+        algo = $1; n = $2; cost = $6
         key = algo SUBSEP n
-
         if (!(key in seen)) {
             seen[key] = 1
             min_cost[key] = cost
             max_cost[key] = cost
-            algos_by_n[n] = algos_by_n[n] " " algo
-            all_ns[n] = 1
             all_keys[key] = 1
         } else {
             if (cost < min_cost[key]) min_cost[key] = cost
@@ -99,7 +98,7 @@ awk -F',' '
     }
 
     END {
-        print "n,algorithm,algorithm_cost,dijkstra_optimal_cost,is_optimal,is_consistent" > "'"$REPORT_FILE"'"
+        print "n,algorithm,algorithm_cost,expected_optimal_cost,movement_rule,is_optimal,is_consistent" > "'"$REPORT_FILE"'"
 
         total = 0
         optimal_count = 0
@@ -112,32 +111,39 @@ awk -F',' '
 
             lo = min_cost[key]
             hi = max_cost[key]
-            dcost = (n in optimal_cost) ? optimal_cost[n] : "NA"
+
+            if (algo == "manhattan") {
+                dcost = (n in optimal_4dir) ? optimal_4dir[n] : "NA"
+                rule = "4-directional"
+            } else {
+                dcost = (n in optimal_8dir) ? optimal_8dir[n] : "NA"
+                rule = "8-directional"
+            }
 
             is_consistent = (lo == hi) ? "yes" : "no"
             is_optimal = (dcost != "NA" && lo == dcost) ? "yes" : "no"
 
-            print n","algo","lo","dcost","is_optimal","is_consistent >> "'"$REPORT_FILE"'"
+            print n","algo","lo","dcost","rule","is_optimal","is_consistent >> "'"$REPORT_FILE"'"
 
             total++
             if (is_optimal == "yes") optimal_count++
             if (is_consistent == "yes") consistent_count++
 
             if (is_optimal == "no") {
-                printf "  MISMATCH: N=%s %s found cost %s, optimal is %s\n", n, algo, lo, dcost
+                printf "  MISMATCH: N=%s %s (%s) found cost %s, expected %s\n", n, algo, rule, lo, dcost
             }
             if (is_consistent == "no") {
-                printf "  INCONSISTENT: N=%s %s returned costs ranging %s-%s across its 20 runs\n", n, algo, lo, hi
+                printf "  INCONSISTENT: N=%s %s returned costs ranging %s-%s across its 10 runs\n", n, algo, lo, hi
             }
         }
 
         print ""
         print "=== Summary ==="
         printf "Total (n, algorithm) pairs checked: %d\n", total
-        printf "Found the optimal path: %d / %d\n", optimal_count, total
-        printf "Consistent across all 20 runs: %d / %d\n", consistent_count, total
+        printf "Found the optimal path (under their own movement rule): %d / %d\n", optimal_count, total
+        printf "Consistent across all 10 runs: %d / %d\n", consistent_count, total
     }
-' "$DIJKSTRA_BASELINE_FILE" "$RESULTS_FILE"
+' "$DIJKSTRA_4DIR_FILE" "$DIJKSTRA_8DIR_FILE" "$RESULTS_FILE"
 
 # sort the report numerically by n, then by algorithm (header stays on top)
 {

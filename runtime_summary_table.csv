@@ -1,0 +1,4 @@
+Heuristic,Mean Runtime (ms),Std Dev (ms),Runs Used,Outliers Excluded
+Manhattan,0.0362,0.0041,201,9
+Euclidean,0.0431,0.0081,205,5
+Chebyshev,0.0428,0.0076,204,6

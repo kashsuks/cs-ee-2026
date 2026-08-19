@@ -14,13 +14,13 @@ int main(int argc, char* argv[]) {
 
     test_case tc = parse_test_case(testcase_file);
 
-    // Chebyshev distance: h(n) = max(|dx|, |dy|).
-    // Note: this graph only allows 4-directional movement (see get_neighbours
-    // in astar_common.h) -- there is no diagonal movement between nodes.
-    // Chebyshev distance assumes diagonal movement is possible, so on this
-    // graph it can overestimate the true cost and is therefore NOT admissible.
-    // It's included purely as a comparison point, not because it's expected
-    // to perform optimally here.
+    // Chebyshev distance (h(n) = max(|dx|,|dy|)) explicitly assumes a
+    // diagonal step covers both axes at once for the same cost as an
+    // orthogonal step, so this search runs in 8-directional mode --
+    // matching the heuristic's own assumption. Under this movement rule
+    // Chebyshev is admissible, unlike when forced onto a 4-directional grid.
+    const bool allow_diagonal = true;
+
     auto heuristic = [](const point& a, const point& b) -> double {
         int dx = std::abs(a.x - b.x);
         int dy = std::abs(a.y - b.y);
@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
     };
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    search_result result = run_search(tc, heuristic);
+    search_result result = run_search(tc, heuristic, allow_diagonal);
     auto t1 = std::chrono::high_resolution_clock::now();
 
     double time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

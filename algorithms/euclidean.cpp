@@ -14,6 +14,11 @@ int main(int argc, char* argv[]) {
 
     test_case tc = parse_test_case(testcase_file);
 
+    // Euclidean distance measures unrestricted straight-line distance and
+    // makes no assumption of axis-aligned movement, so this search runs in
+    // 8-directional mode -- matching the heuristic's own assumption.
+    const bool allow_diagonal = true;
+
     auto heuristic = [](const point& a, const point& b) -> double {
         double dx = a.x - b.x;
         double dy = a.y - b.y;
@@ -21,7 +26,7 @@ int main(int argc, char* argv[]) {
     };
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    search_result result = run_search(tc, heuristic);
+    search_result result = run_search(tc, heuristic, allow_diagonal);
     auto t1 = std::chrono::high_resolution_clock::now();
 
     double time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
