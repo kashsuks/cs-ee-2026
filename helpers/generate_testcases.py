@@ -1,12 +1,19 @@
 import random
 from collections import deque
+from math import sqrt
 
 GRID_WIDTH = 10
 GRID_HEIGHT = 10
 START = (0, 0)
 TARGET = (9, 9)
-MIN_WEIGHT = 1
-MAX_WEIGHT = 8
+
+# Edge weights model city-block lengths in metres: horizontal edges run
+# along avenues, vertical edges along the (shorter) cross streets. This
+# also defines the tightest admissible per-step bound any heuristic can
+# assume -- see MIN_EDGE_WEIGHT in astar_common.h, which must be kept in
+# sync with min(MIN_WEIGHT_H, MIN_WEIGHT_V) below.
+MIN_WEIGHT_H, MAX_WEIGHT_H = 100, 150  # avenues
+MIN_WEIGHT_V, MAX_WEIGHT_V = 60, 100   # streets
 
 def gen_weights(rng):
     h_weights = {}   # (x, y) -> weight of edge (x,y)-(x+1,y)
@@ -17,13 +24,22 @@ def gen_weights(rng):
     for y in range(GRID_HEIGHT):
         for x in range(GRID_WIDTH):
             if x < GRID_WIDTH - 1:
-                h_weights[(x, y)] = rng.randint(MIN_WEIGHT, MAX_WEIGHT)
+                h_weights[(x, y)] = rng.randint(MIN_WEIGHT_H, MAX_WEIGHT_H)
             if y < GRID_HEIGHT - 1:
-                v_weights[(x, y)] = rng.randint(MIN_WEIGHT, MAX_WEIGHT)
+                v_weights[(x, y)] = rng.randint(MIN_WEIGHT_V, MAX_WEIGHT_V)
+
+    # Diagonal edges aren't sampled independently -- a diagonal cuts across
+    # one avenue block and one street block, so its physical length is the
+    # hypotenuse of the H/V block it cuts across (Pythagorean distance),
+    # not an arbitrary number.
+    for y in range(GRID_HEIGHT):
+        for x in range(GRID_WIDTH):
             if x < GRID_WIDTH - 1 and y < GRID_HEIGHT - 1:
-                d1_weights[(x, y)] = rng.randint(MIN_WEIGHT, MAX_WEIGHT)
+                h, v = h_weights[(x, y)], v_weights[(x, y)]
+                d1_weights[(x, y)] = round(sqrt(h * h + v * v))
             if x < GRID_WIDTH - 1 and y > 0:
-                d2_weights[(x, y - 1)] = rng.randint(MIN_WEIGHT, MAX_WEIGHT)
+                h, v = h_weights[(x, y - 1)], v_weights[(x, y - 1)]
+                d2_weights[(x, y - 1)] = round(sqrt(h * h + v * v))
 
     return h_weights, v_weights, d1_weights, d2_weights
 

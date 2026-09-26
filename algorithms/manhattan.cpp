@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     const bool allow_diagonal = false;
 
     auto heuristic = [](const point& a, const point& b) -> double {
-        return std::abs(a.x - b.x) + std::abs(a.y - b.y);
+        return (std::abs(a.x - b.x) + std::abs(a.y - b.y)) * MIN_EDGE_WEIGHT;
     };
 
     auto t0 = std::chrono::high_resolution_clock::now();

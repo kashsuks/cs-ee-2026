@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     auto heuristic = [](const point& a, const point& b) -> double {
         int dx = std::abs(a.x - b.x);
         int dy = std::abs(a.y - b.y);
-        return std::max(dx, dy);
+        return std::max(dx, dy) * MIN_EDGE_WEIGHT;
     };
 
     auto t0 = std::chrono::high_resolution_clock::now();

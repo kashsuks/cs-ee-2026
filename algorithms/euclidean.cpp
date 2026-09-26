@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
     auto heuristic = [](const point& a, const point& b) -> double {
         double dx = a.x - b.x;
         double dy = a.y - b.y;
-        return std::sqrt(dx * dx + dy * dy);
+        return std::sqrt(dx * dx + dy * dy) * MIN_EDGE_WEIGHT;
     };
 
     auto t0 = std::chrono::high_resolution_clock::now();

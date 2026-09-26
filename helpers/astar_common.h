@@ -1,4 +1,15 @@
 #pragma once
+
+// Tightest admissible per-grid-step cost: must equal
+// min(MIN_WEIGHT_H, MIN_WEIGHT_V) from generate_testcases.py. Each
+// heuristic multiplies its raw grid-unit distance by this constant so it
+// stays a valid (and informative) lower bound now that edge weights are
+// realistic block lengths in metres rather than small integers -- without
+// this scaling, h(n) would still be technically admissible but would
+// underestimate true cost by ~60-150x, making A* degenerate toward
+// Dijkstra's expansion pattern for every heuristic.
+constexpr double MIN_EDGE_WEIGHT = 60.0;
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
