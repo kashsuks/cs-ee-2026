@@ -1,10 +1,12 @@
 #include "helpers/astar_common.h"
 #include <chrono>
 #include <cstdlib>
+#include <string>
 
 int main(int argc, char* argv[]) {
     if (argc < 4) {
-        std::cerr << "usage: " << argv[0] << " <testcase_file> <n> <run_index>\n";
+        std::cerr << "usage: " << argv[0] << " <testcase_file> <n> <run_index> [diagonal]\n";
+        std::cerr << "  pass 'diagonal' as a 4th arg to run on the 8-directional graph\n";
         return 1;
     }
 
@@ -12,14 +14,14 @@ int main(int argc, char* argv[]) {
     int n = std::atoi(argv[2]);
     int run_index = std::atoi(argv[3]);
 
-    test_case tc = parse_test_case(testcase_file);
+    // Movement is a runtime switch, not baked into the heuristic, so
+    // Chebyshev can be measured on the same 4-dir and 8-dir graphs as
+    // Manhattan and Euclidean -- otherwise any gap between heuristics is
+    // confounded with a difference in graph connectivity, not heuristic
+    // quality.
+    bool allow_diagonal = (argc >= 5 && std::string(argv[4]) == "diagonal");
 
-    // Chebyshev distance (h(n) = max(|dx|,|dy|)) explicitly assumes a
-    // diagonal step covers both axes at once for the same cost as an
-    // orthogonal step, so this search runs in 8-directional mode --
-    // matching the heuristic's own assumption. Under this movement rule
-    // Chebyshev is admissible, unlike when forced onto a 4-directional grid.
-    const bool allow_diagonal = true;
+    test_case tc = parse_test_case(testcase_file);
 
     auto heuristic = [](const point& a, const point& b) -> double {
         int dx = std::abs(a.x - b.x);
@@ -27,13 +29,20 @@ int main(int argc, char* argv[]) {
         return std::max(dx, dy) * MIN_EDGE_WEIGHT;
     };
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    // Average over many in-process searches to reduce timer/scheduler
+    // noise, which is otherwise comparable in magnitude to a single
+    // ~40us search. One warm-up run is discarded first.
+    const int REPS = 1000;
     search_result result = run_search(tc, heuristic, allow_diagonal);
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int r = 0; r < REPS; ++r) {
+        result = run_search(tc, heuristic, allow_diagonal);
+    }
     auto t1 = std::chrono::high_resolution_clock::now();
+    double time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / REPS;
 
-    double time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-    std::cout << "chebyshev," << n << "," << run_index << ","
+    std::cout << "chebyshev," << (allow_diagonal ? "8dir" : "4dir") << ","
+              << n << "," << run_index << ","
               << time_ms << "," << result.nodes_explored << ","
               << (result.found ? result.path_cost : -1) << "\n";
 

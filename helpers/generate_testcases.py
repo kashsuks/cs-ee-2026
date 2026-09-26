@@ -15,6 +15,15 @@ TARGET = (9, 9)
 MIN_WEIGHT_H, MAX_WEIGHT_H = 100, 150  # avenues
 MIN_WEIGHT_V, MAX_WEIGHT_V = 60, 100   # streets
 
+# Weights are generated ONCE, from their own RNG, independent of N and of
+# the obstacle layout. Obstacles are drawn from a separate RNG. Without this
+# split, changing N also silently changed every edge weight (the old code
+# reseeded a single RNG with 1000+N and drew weights then obstacles from
+# it), so path-cost differences across N were confounded between "more
+# obstacles" and "different graph entirely".
+WEIGHT_SEED = 999
+OBSTACLE_SEED = 500
+
 def gen_weights(rng):
     h_weights = {}   # (x, y) -> weight of edge (x,y)-(x+1,y)
     v_weights = {}   # (x, y) -> weight of edge (x,y)-(x,y+1)
@@ -65,25 +74,43 @@ def is_connected(obstacles):
                     queue.append((nx, ny))
     return TARGET in visited
 
-def gen_obstacles(rng, n):
+def build_nested_obstacle_sequence(max_n):
+    # Shuffle every candidate cell once under a fixed seed, then take cells
+    # in that order, skipping any that would disconnect START from TARGET.
+    # The obstacle set for a given n is exactly the first n cells of this
+    # sequence, so the layout at N+1 is always the layout at N plus one
+    # obstacle -- any change in a search result between N and N+1 comes
+    # from exactly one new obstacle, never a reshuffled graph.
     all_cells = [(x, y) for x in range(GRID_WIDTH) for y in range(GRID_HEIGHT)
                  if (x, y) != START and (x, y) != TARGET]
-    for attempt in range(2000):
-        candidate = set(rng.sample(all_cells, n))
+    order_rng = random.Random(OBSTACLE_SEED)
+    order_rng.shuffle(all_cells)
+
+    obstacles = set()
+    sequence = []
+    for cell in all_cells:
+        if len(sequence) == max_n:
+            break
+        candidate = obstacles | {cell}
         if is_connected(candidate):
-            return candidate
-    raise RuntimeError(f"Could not find connected obstacle layout for n={n}")
+            obstacles = candidate
+            sequence.append(cell)
 
-def write_testcase(n, path):
-    seed = 1000 + n  # fixed per-N seed for reproducibility
-    rng = random.Random(seed)
+    if len(sequence) < max_n:
+        raise RuntimeError(
+            f"Could not build a nested connected obstacle layout of size {max_n} "
+            f"(only reached {len(sequence)})"
+        )
+    return sequence
 
-    h_weights, v_weights, d1_weights, d2_weights = gen_weights(rng)
-    obstacles = gen_obstacles(rng, n)
+def write_testcase(n, path, weights, obstacle_sequence):
+    h_weights, v_weights, d1_weights, d2_weights = weights
+    obstacles = obstacle_sequence[:n]
 
     lines = []
     lines.append(f"# Test case N={n}")
-    lines.append(f"# Seed used: {seed}")
+    lines.append(f"# Weight seed: {WEIGHT_SEED} (fixed across all N)")
+    lines.append(f"# Obstacle seed: {OBSTACLE_SEED} (nested: first {n} of one shuffled order)")
     lines.append(f"GRID_WIDTH {GRID_WIDTH}")
     lines.append(f"GRID_HEIGHT {GRID_HEIGHT}")
     lines.append(f"START {START[0]},{START[1]}")
@@ -120,7 +147,13 @@ if __name__ == "__main__":
     import os
     out_dir = "testcases"
     os.makedirs(out_dir, exist_ok=True)
+
+    weight_rng = random.Random(WEIGHT_SEED)
+    weights = gen_weights(weight_rng)
+
+    obstacle_sequence = build_nested_obstacle_sequence(20)
+
     for n in range(0, 21):
         path = os.path.join(out_dir, f"testcase_n_{n}.txt")
-        write_testcase(n, path)
+        write_testcase(n, path, weights, obstacle_sequence)
         print(f"wrote {path}")
