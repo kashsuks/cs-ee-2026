@@ -1,0 +1,7 @@
+heuristic,movement,mean_time_ms,mean_nodes,mean_cost,optimal_cases,time_per_node_us
+chebyshev,4dir,0.0168,85.9048,1667.5714,21,0.1958
+chebyshev,8dir,0.0194,72.4762,1295.5714,21,0.2681
+euclidean,4dir,0.017,85.7143,1667.5714,21,0.1988
+euclidean,8dir,0.0195,72.0476,1295.5714,21,0.2701
+manhattan,4dir,0.017,84.619,1667.5714,21,0.2004
+manhattan,8dir,0.016,57.9524,1295.5714,21,0.2758

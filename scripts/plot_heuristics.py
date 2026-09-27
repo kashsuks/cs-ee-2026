@@ -1,134 +1,72 @@
-#!/usr/bin/env python3
-"""
-Usage:
-    python3 scripts/plot_heuristics.py
-    python3 scripts/plot_heuristics.py -o figures/heuristics.pdf
-"""
-
-import argparse
-import csv
-from collections import defaultdict
-from statistics import mean, pstdev
-
+from os import WCOREDUMP
+import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
+from scipy.stats import wilcoxon
 
-COLORS = {
-    "manhattan": "#2a78d6",
-    "euclidean": "#eb6834",
-    "chebyshev": "#1baf7a",
-}
-LABELS = {
-    "manhattan": "Manhattan",
-    "euclidean": "Euclidean",
-    "chebyshev": "Chebyshev",
-}
-ORDER = ["manhattan", "euclidean", "chebyshev"]
+pd.set_option("display.width", 200)
+pd.set_option("display.max_columns", None)
 
+df = pd.read_csv("results/results.csv")
+dij = pd.read_csv("results/dijkstra.csv")[["movement", "n", "path_cost"]]
+dij = dij.rename(columns={"path_cost": "dijkstra_cost"})
 
-def load_results(path):
-    # (algorithm, n) -> {"nodes": int, "cost": int, "times": [float, ...]}
-    data = defaultdict(lambda: {"nodes": None, "cost": None, "times": []})
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            key = (row["algorithm"], int(row["n"]))
-            entry = data[key]
-            entry["nodes"] = int(row["nodes_explored"])
-            entry["cost"] = int(row["path_cost"])
-            entry["times"].append(float(row["time_ms"]))
-    return data
+# 1. Tukey's fences, computed separately for each heuristic, movement rule and N
+groups = ["heuristic", "movement", "n"]
+g = df.groupby(groups)["time_ms"]
+q1 = g.transform(lambda x: x.quantile(0.25))
+q3 = g.transform(lambda x: x.quantile(0.75))
+iqr = q3 - q1
+keep = (df["time_ms"] >= q1 - 1.5 * iqr) & (df["time_ms"] <= q3 + 1.5 * iqr)
+clean = df[keep]
+excluded = len(df) - len(clean)
+print(f"Runs: {len(df)}, excluded as outliers: {excluded}, used: {len(clean)}")
+print(clean.groupby(["heuristic", "movement"]).size().rename("runs used"))
 
+# 2. One row per heuristic, movement rule and N (nodes and cost do not vary between runs)
+per_n = clean.groupby(groups).agg(time_ms=("time_ms", "mean"),
+                                  nodes=("nodes_explored", "first"),
+                                  cost=("path_cost", "first")).reset_index()
+per_n = per_n.merge(dij, on=["movement", "n"])
+per_n["optimal"] = per_n["cost"] == per_n["dijkstra_cost"]
 
-def series_for(data, algorithm, field):
-    ns = sorted(n for (alg, n) in data if alg == algorithm)
-    if field == "time_mean_std":
-        means = [mean(data[(algorithm, n)]["times"]) for n in ns]
-        stds = [pstdev(data[(algorithm, n)]["times"]) for n in ns]
-        return ns, means, stds
-    values = [data[(algorithm, n)][field] for n in ns]
-    return ns, values
+# 3. Summary table for Section 5.1
+summary = per_n.groupby(["heuristic", "movement"]).agg(
+    mean_time_ms=("time_ms", "mean"),
+    mean_nodes=("nodes", "mean"),
+    mean_cost=("cost", "mean"),
+    optimal_cases=("optimal", "sum"))
+summary["time_per_node_us"] = summary["mean_time_ms"] / summary["mean_nodes"] * 1000
+print(summary.round(4))
+summary.round(4).to_csv("results/summary_table.csv")
 
+# 4. Significance test, paired by N (same graph): Wilcoxon signed-rank
+def compare(h1, m1, h2, m2, metric="time_ms"):
+    a = per_n[(per_n.heuristic == h1) & (per_n.movement == m1)].sort_values("n")[metric]
+    b = per_n[(per_n.heuristic == h2) & (per_n.movement == m2)].sort_values("n")[metric]
+    stat, p = wilcoxon(a.values, b.values)
+    print(f"{metric}: {h1}/{m1} vs {h2}/{m2}: W = {stat:.0f}, p = {p:.4f}")
 
-def style_axis(ax, xlabel, ylabel, title):
-    ax.set_xlabel(xlabel, fontsize=11)
-    ax.set_ylabel(ylabel, fontsize=11)
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=10)
-    ax.grid(True, which="major", linewidth=0.6, alpha=0.35)
-    ax.xaxis.set_major_locator(mticker.MultipleLocator(2))
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    for spine in ("left", "bottom"):
-        ax.spines[spine].set_color("#888888")
-    ax.tick_params(colors="#333333", labelsize=9.5)
+compare("manhattan", "4dir", "euclidean", "4dir")
+compare("euclidean", "8dir", "chebyshev", "8dir")
+compare("manhattan", "8dir", "euclidean", "8dir")
+compare("manhattan", "4dir", "manhattan", "8dir")
 
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "-i", "--input", default="results/results.csv",
-        help="path to results.csv (default: results/results.csv)",
-    )
-    parser.add_argument(
-        "-o", "--output", default="results/heuristics_comparison.png",
-        help="output image path (default: results/heuristics_comparison.png)",
-    )
-    args = parser.parse_args()
-
-    data = load_results(args.input)
-
-    plt.rcParams.update({
-        "font.family": "serif",
-        "figure.facecolor": "white",
-        "axes.facecolor": "white",
-    })
-
-    fig, (ax_nodes, ax_time) = plt.subplots(1, 2, figsize=(11, 4.5))
-
-    for algo in ORDER:
-        ns, nodes = series_for(data, algo, "nodes")
-        ax_nodes.plot(
-            ns, nodes,
-            label=LABELS[algo], color=COLORS[algo],
-            linewidth=2, marker="o", markersize=4.5,
-        )
-    style_axis(
-        ax_nodes,
-        xlabel="Number of obstacles (N)",
-        ylabel="Nodes expanded",
-        title="(a) Search Efficiency",
-    )
-
-    for algo in ORDER:
-        ns, means, stds = series_for(data, algo, "time_mean_std")
-        lo = [m - s for m, s in zip(means, stds)]
-        hi = [m + s for m, s in zip(means, stds)]
-        ax_time.plot(
-            ns, means,
-            label=LABELS[algo], color=COLORS[algo],
-            linewidth=2, marker="o", markersize=4.5,
-        )
-        ax_time.fill_between(ns, lo, hi, color=COLORS[algo], alpha=0.15, linewidth=0)
-    style_axis(
-        ax_time,
-        xlabel="Number of obstacles (N)",
-        ylabel="Runtime (ms)",
-        title="(b) Runtime (mean ± 1 std, 20 runs)",
-    )
-
-    handles, labels = ax_nodes.get_legend_handles_labels()
-    fig.legend(
-        handles, labels, loc="lower center", ncol=3,
-        frameon=False, bbox_to_anchor=(0.5, -0.02), fontsize=10.5,
-    )
-
-    fig.suptitle(
-        "A* Heuristic Comparison on 10×10 Weighted Grids",
-        fontsize=13.5, fontweight="bold", y=1.02,
-    )
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
-    fig.savefig(args.output, dpi=300, bbox_inches="tight")
-    print(f"Saved figure to {args.output}")
-
-
-if __name__ == "__main__":
-    main()
+# 5. Charts
+for metric, label, fname in [("time_ms", "Mean execution time (ms)", "results/fig_time.png"),
+                             ("nodes", "Nodes explored", "results/fig_nodes.png"),
+                             ("cost", "Path cost (weight units)", "results/fig_cost.png")]:
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+    for ax, mv in zip(axes, ["4dir", "8dir"]):
+        for h in ["manhattan", "euclidean", "chebyshev"]:
+            d = per_n[(per_n.heuristic == h) & (per_n.movement == mv)]
+            ax.plot(d["n"], d[metric], marker="o", label=h.capitalize())
+        if metric == "cost":
+            d = dij[dij.movement == mv]
+            ax.plot(d["n"], d["dijkstra_cost"], "k--", label="Dijkstra (optimal)")
+        ax.set_title("4-directional" if mv == "4dir" else "8-directional")
+        ax.set_xlabel("Number of obstacles N")
+        ax.set_xticks(range(0, 21, 2))
+    axes[0].set_ylabel(label)
+    axes[1].legend()
+    fig.tight_layout()
+    fig.savefig(fname, dpi=200)
