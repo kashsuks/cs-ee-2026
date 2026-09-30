@@ -20,7 +20,7 @@ chebyshev,8dir,0,3,0.021617,82,1291
 manhattan,4dir,0,4,0.0194659,96,1651
 manhattan,8dir,0,4,0.0183848,67,1291
 euclidean,4dir,0,4,0.019036,96,1651
-euclidean,8dir,0,4,0.0208015,81,1291
+euclidean,8dir,0,4,0.0208015,81,1291 
 chebyshev,4dir,0,4,0.0189388,97,1651
 chebyshev,8dir,0,4,0.0219183,82,1291
 manhattan,4dir,0,5,0.0194883,96,1651
