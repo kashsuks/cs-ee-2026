@@ -82,7 +82,7 @@ BASELINE_LINESTYLE_COST = (0, (1, 2))
 BASELINE_COLOR = "#c3c2b7"   # palette "Baseline / axis" token
 INK_PRIMARY = "#0b0b0b"      # palette "Primary ink"
 INK_MUTED = "#898781"        # palette "Muted (axis/labels)"
-SURFACE = "#fcfcfb"          # palette "Chart surface"
+SURFACE = "#ffffff"          # chart background (pure white)
 MOVEMENT_TITLES = {"4dir": "4-Directional", "8dir": "8-Directional"}
 
 SIZE_DEFAULT = 13
