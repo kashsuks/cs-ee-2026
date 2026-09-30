@@ -64,6 +64,21 @@ compare("manhattan", "4dir", "manhattan", "8dir")
 # references/palette.md in the dataviz skill): worst all-pairs CVD deltaE
 # 9.2, worst normal-vision deltaE 24.0 on a light surface.
 COLORS = {"manhattan": "#2a78d6", "euclidean": "#eb6834", "chebyshev": "#1baf7a"}
+
+# On the cost chart, every heuristic lands on the exact same path cost as
+# Dijkstra at every N (0 admissibility violations in this dataset) -- the
+# lines are not merely close, they are numerically identical, so no axis
+# transform (log included) can pull them apart. Distinct, phase-offset
+# dash patterns let all four colors show through instead of the
+# last-drawn line hiding the rest, without fabricating a data difference
+# that doesn't exist.
+COST_LINESTYLES = {
+    "manhattan": (0, (8, 4)),
+    "euclidean": (4, (8, 4)),   # same period as manhattan, offset half a cycle
+    "chebyshev": (0, (2, 2)),   # finer dash, threads through both above
+}
+BASELINE_LINESTYLE_COST = (0, (1, 2))
+
 BASELINE_COLOR = "#c3c2b7"   # palette "Baseline / axis" token
 INK_PRIMARY = "#0b0b0b"      # palette "Primary ink"
 INK_MUTED = "#898781"        # palette "Muted (axis/labels)"
@@ -154,16 +169,19 @@ for metric, label, fname in [("time_ms", "Mean execution time (ms)", "results/fi
         labels = []
 
         if metric == "cost":
+            baseline_style = BASELINE_LINESTYLE_COST
             d = dij[dij.movement == mv].sort_values("n")
-            ax.plot(d["n"], d["dijkstra_cost"], color=BASELINE_COLOR, linestyle="--", linewidth=1.5, zorder=1)
+            ax.plot(d["n"], d["dijkstra_cost"], color=BASELINE_COLOR, linestyle=baseline_style, linewidth=1.5, zorder=1)
             labels.append({
                 "x": d["n"].iloc[-1], "y": d["dijkstra_cost"].iloc[-1],
                 "text": "Dijkstra (optimal)", "color": BASELINE_COLOR,
             })
 
-        for h in ["manhattan", "euclidean", "chebyshev"]:
+        for i, h in enumerate(["manhattan", "euclidean", "chebyshev"]):
             d = per_n[(per_n.heuristic == h) & (per_n.movement == mv)].sort_values("n")
-            ax.plot(d["n"], d[metric], color=COLORS[h], linewidth=2, zorder=2)
+            linestyle = COST_LINESTYLES[h] if metric == "cost" else "-"
+            linewidth = 2.4 if metric == "cost" else 2
+            ax.plot(d["n"], d[metric], color=COLORS[h], linewidth=linewidth, linestyle=linestyle, zorder=2 + i)
             labels.append({"x": d["n"].iloc[-1], "y": d[metric].iloc[-1], "text": h.capitalize(), "color": COLORS[h]})
 
         style_axis(
